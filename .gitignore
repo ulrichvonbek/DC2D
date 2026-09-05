@@ -1,0 +1,18 @@
+# Compiled binaries
+dungeon-crawl
+DC2D
+*.exe
+
+# Test binaries and coverage
+*.test
+*.out
+coverage.html
+
+# Rapid property-test failure logs
+testdata/rapid/
+
+# Editor / OS cruft
+.idea/
+.vscode/
+*.swp
+.DS_Store
