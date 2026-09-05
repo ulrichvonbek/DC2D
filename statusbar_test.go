@@ -176,13 +176,13 @@ func TestHRDisplayRefreshesOncePerSecond(t *testing.T) {
 
 	// BPM changed, but stay inside the refresh window: still the old number.
 	hr.bpm = 84.4
-	if got := disp.Text(hr, t0.Add(500*time.Millisecond)); got != "80" {
+	if got := disp.Text(hr, t0.Add(400*time.Millisecond)); got != "80" {
 		t.Fatalf("text refreshed too early: got %q, want %q", got, "80")
 	}
 
-	// One second later: the number updates, rounded.
-	if got := disp.Text(hr, t0.Add(time.Second)); got != "84" {
-		t.Fatalf("text did not refresh at 1s: got %q, want %q", got, "84")
+	// Half a second later: the number updates, rounded.
+	if got := disp.Text(hr, t0.Add(500*time.Millisecond)); got != "84" {
+		t.Fatalf("text did not refresh at 500ms: got %q, want %q", got, "84")
 	}
 
 	// Rounding to the nearest whole number.

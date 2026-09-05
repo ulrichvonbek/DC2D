@@ -30,7 +30,7 @@ type MonsterStats struct {
 func spiderStats() MonsterStats {
 	return MonsterStats{
 		Pace:      1200 * time.Millisecond,
-		Spike:     5,
+		Spike:     12,
 		HitChance: 0.5,
 		OpenDoors: false,
 	}
@@ -110,22 +110,22 @@ func (m *Monster) Update(l *Level, px, py int, dt time.Duration) float64 {
 func (m *Monster) move(l *Level, px, py int) {
 	switch m.state {
 	case monsterChase:
-		m.stepToward(l, px, py)
+		m.stepToward(l, px, py, px, py)
 	case monsterSeek:
-		m.stepToward(l, m.lastSeenX, m.lastSeenY)
+		m.stepToward(l, m.lastSeenX, m.lastSeenY, px, py)
 		if m.TX == m.lastSeenX && m.TY == m.lastSeenY {
 			m.state = monsterWander
 		} else if m.seekT <= 0 {
 			m.state = monsterWander
 		}
 	default:
-		m.wander(l)
+		m.wander(l, px, py)
 	}
 }
 
 // stepToward makes a single greedy, 4-directional step toward a tile. If the
 // preferred axis is blocked it tries the other; no pathfinding.
-func (m *Monster) stepToward(l *Level, tx, ty int) {
+func (m *Monster) stepToward(l *Level, tx, ty, px, py int) {
 	dx, dy := 0, 0
 	if tx > m.TX {
 		dx = 1
@@ -139,31 +139,31 @@ func (m *Monster) stepToward(l *Level, tx, ty int) {
 	}
 
 	if absInt(dx) >= absInt(dy) {
-		if m.tryStep(l, dx, 0) {
+		if m.tryStep(l, dx, 0, px, py) {
 			return
 		}
-		m.tryStep(l, 0, dy)
+		m.tryStep(l, 0, dy, px, py)
 		return
 	}
-	if m.tryStep(l, 0, dy) {
+	if m.tryStep(l, 0, dy, px, py) {
 		return
 	}
-	m.tryStep(l, dx, 0)
+	m.tryStep(l, dx, 0, px, py)
 }
 
 // wander takes one random step, retrying up to each direction once.
-func (m *Monster) wander(l *Level) {
+func (m *Monster) wander(l *Level, px, py int) {
 	for _, i := range rand.Perm(4) {
 		d := dirVectors[i]
-		if m.tryStep(l, d[0], d[1]) {
+		if m.tryStep(l, d[0], d[1], px, py) {
 			return
 		}
 	}
 }
 
-func (m *Monster) tryStep(l *Level, dx, dy int) bool {
+func (m *Monster) tryStep(l *Level, dx, dy, px, py int) bool {
 	nx, ny := m.TX+dx, m.TY+dy
-	if !l.monsterCanEnter(nx, ny, m.stats.OpenDoors) {
+	if !l.monsterMayOccupy(nx, ny, m, px, py) {
 		return false
 	}
 	m.TX, m.TY = nx, ny

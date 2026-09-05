@@ -22,14 +22,52 @@ func testCorridor() *Level {
 
 func TestSpiderIsWeakNonDoorOpener(t *testing.T) {
 	s := spiderStats()
-	if s.Spike >= hrBumpSpike {
-		t.Fatalf("spider spike %.0f should be weaker than a wall bump (%d)", s.Spike, hrBumpSpike)
+	if s.Spike != 12 {
+		t.Fatalf("spider spike = %.0f, want 12", s.Spike)
 	}
 	if s.HitChance != 0.5 {
 		t.Fatalf("spider hit chance = %.2f, want 0.5", s.HitChance)
 	}
 	if s.OpenDoors {
 		t.Fatal("spiders should not open doors")
+	}
+}
+
+func TestMonstersCannotShareASquare(t *testing.T) {
+	l := testCorridor()
+	a := NewMonster(0, 5, spiderStats())
+	b := NewMonster(1, 5, spiderStats())
+	l.Monsters = []*Monster{a, b}
+
+	// b tries to step onto a's tile from one tile away.
+	b.TX, b.TY = 0, 5 // force collision scenario
+	if l.monsterMayOccupy(0, 5, b, 20, 5) {
+		t.Fatal("a monster may occupy another monster's tile")
+	}
+
+	// A monster cannot step onto the player either.
+	if l.monsterMayOccupy(2, 5, a, 2, 5) {
+		t.Fatal("a monster may occupy the player's tile")
+	}
+
+	// An empty floor tile is fine.
+	if !l.monsterMayOccupy(6, 5, a, 20, 5) {
+		t.Fatal("a monster should move onto an empty floor tile")
+	}
+}
+
+func TestMonsterDoesNotMoveOntoAnotherMonster(t *testing.T) {
+	l := testCorridor()
+	a := NewMonster(2, 5, spiderStats())
+	b := NewMonster(3, 5, spiderStats())
+	l.Monsters = []*Monster{a, b}
+
+	a.state = monsterChase
+	a.paceT = 0
+	// b sits between a and the player at (20,5): the target step is blocked.
+	a.Update(l, 20, 5, 10*time.Millisecond)
+	if a.TX == b.TX && a.TY == b.TY {
+		t.Fatalf("monster stepped onto an occupied tile (%d,%d)", a.TX, a.TY)
 	}
 }
 

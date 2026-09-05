@@ -43,8 +43,8 @@ const (
 	hrSquarePulse = 2  // px, how much wider the other state is
 
 	// Numeric HR display next to the heart icon.
-	hrTextRefresh = time.Second // refresh rate of the number
-	hrTextGap     = 6           // px gap between the icon and the number
+	hrTextRefresh = 500 * time.Millisecond // refresh rate of the number
+	hrTextGap     = 6                      // px gap between the icon and the number
 
 	hrBumpSpike = 6 // extra BPM per wall bump
 )
@@ -179,7 +179,9 @@ var (
 )
 
 // statusImages builds the bar background and the two pulse square sizes
-// once; blackOverlay builds the full-window fade layer.
+// once; blackOverlay builds the dungeon-area fade layer. The overlay is
+// sized to the dungeon viewport only, so the status bar below it stays
+// visible during a blackout.
 func statusImages() (*ebiten.Image, [2]*ebiten.Image) {
 	barImgOnce.Do(func() {
 		barImage = ebiten.NewImage(screenWidth, statusBarHeight)
@@ -196,7 +198,7 @@ func statusImages() (*ebiten.Image, [2]*ebiten.Image) {
 
 func blackOverlay() *ebiten.Image {
 	blackImgOnce.Do(func() {
-		blackImg = ebiten.NewImage(screenWidth, screenHeight+statusBarHeight)
+		blackImg = ebiten.NewImage(screenWidth, screenHeight)
 		blackImg.Fill(color.RGBA{0, 0, 0, 255})
 	})
 	return blackImg

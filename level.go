@@ -29,6 +29,7 @@ type Level struct {
 	explored []bool
 	visible  []bool
 
+	rooms     []room
 	firstRoom struct{ x, y, w, h int }
 
 	Monsters []*Monster
@@ -137,6 +138,7 @@ func (l *Level) generate() {
 		l.Tiles[l.idx(stairsX, stairsY)] = TileStairs
 	}
 
+	l.rooms = rooms
 	l.placeDoors()
 
 	l.firstRoom = rooms[0]
@@ -146,18 +148,46 @@ func (l *Level) generate() {
 		spiderSpawnCount)
 }
 
-// placeDoors converts floor tiles shaped like a one-tile passage through
-// rock into doors and the occasional secret door. Doors are passable but
-// block vision; secret doors look like walls. Only tiles with two opposite
-// open neighbours and two opposite wall neighbours qualify, so doors appear
-// in corridors and in the passages between rooms — never in a room interior.
+// placeDoors converts qualifying tiles (one-tile passages through rock)
+// into doors. Tiles on a room's perimeter — its entrances — are a special
+// case: each entrance becomes an open corridor 60% of the time, a normal
+// door 30%, or a hidden door 10%. Everywhere else (mid-hallway passages)
+// keeps the flat per-tile probability.
 func (l *Level) placeDoors() {
 	const (
-		doorProb   = 0.05 // chance per qualifying tile
-		secretProb = 0.12 // share of placed doors that are secret
+		doorProb   = 0.05 // chance per qualifying hallway tile
+		secretProb = 0.12 // share of placed hallway doors that are secret
+	)
+	const (
+		entranceOpenShare   = 0.6 // leave an entrance as open corridor
+		entranceDoorShare   = 0.3 // normal door
+		entranceSecretShare = 0.1 // hidden door
 	)
 
 	type point struct{ x, y int }
+
+	// Room entrances are the qualifying tiles sitting on a room's perimeter:
+	// the wall rows and columns the corridors carve through to get in.
+	entrances := make(map[point]bool, len(l.rooms)*4)
+	for _, r := range l.rooms {
+		for i := r.x; i < r.x+r.w; i++ {
+			if l.doorShapeOK(i, r.y-1) {
+				entrances[point{i, r.y - 1}] = true
+			}
+			if l.doorShapeOK(i, r.y+r.h) {
+				entrances[point{i, r.y + r.h}] = true
+			}
+		}
+		for j := r.y; j < r.y+r.h; j++ {
+			if l.doorShapeOK(r.x-1, j) {
+				entrances[point{r.x - 1, j}] = true
+			}
+			if l.doorShapeOK(r.x+r.w, j) {
+				entrances[point{r.x + r.w, j}] = true
+			}
+		}
+	}
+
 	var candidates []point
 	for ty := 1; ty < l.Height-1; ty++ {
 		for tx := 1; tx < l.Width-1; tx++ {
@@ -172,6 +202,7 @@ func (l *Level) placeDoors() {
 		}
 	}
 
+	// Random order so declustering does not bias which entrance wins.
 	rand.Shuffle(len(candidates), func(a, b int) {
 		candidates[a], candidates[b] = candidates[b], candidates[a]
 	})
@@ -180,13 +211,25 @@ func (l *Level) placeDoors() {
 		if l.hasDoorNeighbor(c.x, c.y) {
 			continue
 		}
+		i := l.idx(c.x, c.y)
+
+		if entrances[c] {
+			switch {
+			case rand.Float64() < entranceSecretShare:
+				l.Tiles[i] = TileSecretDoor
+			case rand.Float64() < entranceDoorShare/(entranceDoorShare+entranceOpenShare):
+				l.Tiles[i] = TileDoor
+			}
+			continue
+		}
+
 		if rand.Float64() >= doorProb {
 			continue
 		}
 		if rand.Float64() < secretProb {
-			l.Tiles[l.idx(c.x, c.y)] = TileSecretDoor
+			l.Tiles[i] = TileSecretDoor
 		} else {
-			l.Tiles[l.idx(c.x, c.y)] = TileDoor
+			l.Tiles[i] = TileDoor
 		}
 	}
 }
@@ -309,6 +352,25 @@ func (l *Level) monsterCanEnter(tx, ty int, openDoors bool) bool {
 	default:
 		return false
 	}
+}
+
+// monsterMayOccupy reports whether a monster m may step onto (tx, ty): the
+// tile must be passable and unoccupied by the player or any other monster.
+// Stronger monsters may later swap places with weaker ones instead of being
+// blocked by this check.
+func (l *Level) monsterMayOccupy(tx, ty int, m *Monster, px, py int) bool {
+	if !l.monsterCanEnter(tx, ty, m.stats.OpenDoors) {
+		return false
+	}
+	if tx == px && ty == py {
+		return false
+	}
+	for _, o := range l.Monsters {
+		if o != m && o.TX == tx && o.TY == ty {
+			return false
+		}
+	}
+	return true
 }
 
 // spawnMonsters places n monsters on random floor tiles at least 10

@@ -94,6 +94,63 @@ func TestCorridorCarving(t *testing.T) {
 	}
 }
 
+func TestDoorEntranceAndHallwayDistribution(t *testing.T) {
+	const levels = 2000
+	entranceTiles, entranceDoors, entranceSecrets := 0, 0, 0
+	hallwayDoors := 0
+
+	onPerimeter := func(l *Level, tx, ty int) bool {
+		for _, r := range l.rooms {
+			if tx >= r.x && tx < r.x+r.w && (ty == r.y-1 || ty == r.y+r.h) {
+				return true
+			}
+			if ty >= r.y && ty < r.y+r.h && (tx == r.x-1 || tx == r.x+r.w) {
+				return true
+			}
+		}
+		return false
+	}
+
+	for i := 0; i < levels; i++ {
+		l := NewLevel(screenWorldW, screenWorldH)
+		for ty := 1; ty < l.Height-1; ty++ {
+			for tx := 1; tx < l.Width-1; tx++ {
+				t := l.Tiles[l.idx(tx, ty)]
+				isDoor := t == TileDoor || t == TileSecretDoor
+				if !isDoor && !(t == TileFloor && l.doorShapeOK(tx, ty)) {
+					continue
+				}
+				if onPerimeter(l, tx, ty) {
+					entranceTiles++
+					if isDoor {
+						entranceDoors++
+						if t == TileSecretDoor {
+							entranceSecrets++
+						}
+					}
+				} else if isDoor {
+					hallwayDoors++
+				}
+			}
+		}
+	}
+
+	entranceRate := float64(entranceDoors) / float64(entranceTiles)
+	secretShare := float64(entranceSecrets) / float64(entranceDoors)
+	t.Logf("entrances: %d tiles, %d doors (%.3f rate), secret share %.3f; %d hallway doors",
+		entranceTiles, entranceDoors, entranceRate, secretShare, hallwayDoors)
+
+	if entranceRate < 0.3 || entranceRate > 0.5 {
+		t.Fatalf("entrance door rate %.3f outside expected ~0.4", entranceRate)
+	}
+	if secretShare < 0.15 || secretShare > 0.35 {
+		t.Fatalf("entrance secret share %.3f outside expected ~0.25", secretShare)
+	}
+	if hallwayDoors == 0 {
+		t.Fatal("no mid-hallway doors appeared")
+	}
+}
+
 func TestDoorShapeOK(t *testing.T) {
 	shape := func(walls, floors [][2]int) *Level {
 		l := &Level{Width: 5, Height: 5, Tiles: make([]Tile, 25)}
