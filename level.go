@@ -337,6 +337,28 @@ func (l *Level) IsBlockedTile(tx, ty int) bool {
 	return l.Tiles[l.idx(tx, ty)] == TileWall
 }
 
+// MonsterAt returns the monster on a tile, or nil. Monsters never share a
+// tile, so at most one can be there.
+func (l *Level) MonsterAt(tx, ty int) *Monster {
+	for _, m := range l.Monsters {
+		if m.TX == tx && m.TY == ty {
+			return m
+		}
+	}
+	return nil
+}
+
+// RemoveMonster removes a monster from the level.
+func (l *Level) RemoveMonster(dead *Monster) {
+	live := l.Monsters[:0]
+	for _, m := range l.Monsters {
+		if m != dead {
+			live = append(live, m)
+		}
+	}
+	l.Monsters = live
+}
+
 // monsterCanEnter reports whether a monster of a type with the given door
 // flag may occupy the tile. Floor and stairs are open to all; door tiles
 // only to door openers; walls never.

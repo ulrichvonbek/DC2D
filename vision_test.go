@@ -196,6 +196,41 @@ func TestDoorVisibleWhenStandingOnIt(t *testing.T) {
 	}
 }
 
+// A door is visible from the near side, but the wall tiles beyond the door
+// plane (both behind it and framing its far side) must stay unexplored. The
+// door's own tile must not act as a propagation source for revealWallNeighbors,
+// or it x-rays the walls on the far side of the sealed door.
+func TestDoorHidesItsFarSide(t *testing.T) {
+	for _, door := range []Tile{TileDoor, TileSecretDoor} {
+		l := &Level{
+			Width:    12,
+			Height:   5,
+			Tiles:    make([]Tile, 12*5),
+			explored: make([]bool, 12*5),
+			visible:  make([]bool, 12*5),
+		}
+		for i := range l.Tiles {
+			l.Tiles[i] = TileWall
+		}
+		for x := 0; x < 5; x++ {
+			l.Tiles[l.idx(x, 2)] = TileFloor
+		}
+		l.Tiles[l.idx(4, 2)] = door
+		// Walls sealing the far side: directly behind the door and framing it.
+
+		l.UpdateVision(2, 2, int(DirEast))
+
+		if !l.visible[l.idx(4, 2)] {
+			t.Error("the door tile itself should be visible")
+		}
+		for _, c := range [][2]int{{5, 1}, {5, 2}, {5, 3}, {6, 1}, {6, 2}} {
+			if l.explored[l.idx(c[0], c[1])] {
+				t.Errorf("x-ray: wall %d,%d beyond the door must not be explored", c[0], c[1])
+			}
+		}
+	}
+}
+
 func newOpenArea() *Level {
 	l := &Level{
 		Width:    24,

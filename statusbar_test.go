@@ -355,7 +355,7 @@ func TestLayoutIncludesStatusBar(t *testing.T) {
 	if w != screenWidth {
 		t.Errorf("width = %d, want %d", w, screenWidth)
 	}
-	if h != screenHeight+statusBarHeight {
-		t.Errorf("height = %d, want %d", h, screenHeight+statusBarHeight)
+	if h != screenHeight+statusBarHeight+infoPanelHeight {
+		t.Errorf("height = %d, want %d", h, screenHeight+statusBarHeight+infoPanelHeight)
 	}
 }

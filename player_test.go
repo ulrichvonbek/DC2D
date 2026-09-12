@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 const startXY = 16
 
@@ -107,5 +110,40 @@ func TestTryMoveKeepsGridAlignment(t *testing.T) {
 		if int(p.X)%tileSize != 0 || int(p.Y)%tileSize != 0 {
 			t.Fatalf("player left grid after move %v: %v,%v", m, p.X, p.Y)
 		}
+	}
+}
+
+// A step into a wall logs the movement label with a red !OUCH! and marks the
+// bump; a step onto floor logs the plain command.
+func TestStepAttemptIntoWallLogsOUCH(t *testing.T) {
+	l := newTestDungeon()
+	p := NewPlayer(startXY, startXY) // tile (1,1); west tile (0,1) is a wall
+
+	e := p.stepAttempt(l, -1, 0, "Move Forward")
+	want := bumpEntry("Move Forward")
+	if !reflect.DeepEqual(e, want) {
+		t.Fatalf("entry = %+v, want %+v", e, want)
+	}
+	if !p.bumped {
+		t.Fatal("a blocked step must mark the bump")
+	}
+	if p.X != startXY || p.Y != startXY {
+		t.Fatalf("a blocked step must not move, got %v,%v", p.X, p.Y)
+	}
+}
+
+func TestStepAttemptOntoFloorLogsPlainCommand(t *testing.T) {
+	l := newTestDungeon()
+	p := NewPlayer(startXY, startXY) // east tile (2,1) is floor
+
+	e := p.stepAttempt(l, 1, 0, "Step Right")
+	if !reflect.DeepEqual(e, logNormal("Step Right")) {
+		t.Fatalf("entry = %+v, want a plain Step Right line", e)
+	}
+	if p.bumped {
+		t.Fatal("a successful step must not mark a bump")
+	}
+	if p.X != 32 || p.Y != startXY {
+		t.Fatalf("the step should land on (2,1), got %v,%v", p.X, p.Y)
 	}
 }

@@ -116,9 +116,10 @@ func (l *Level) UpdateVision(px, py, dir int) {
 
 	// Reveal opaque surfaces next to visible walkable tiles only: a lit wall
 	// must not propagate into the rock behind it (that would x-ray through
-	// walls). A visible door also reveals its frame, so the far side stays
-	// hidden until you step through. Revealed tiles are remembered as explored,
-	// not visible.
+	// walls). Doors and secret doors are treated like walls here — their own
+	// tile may be visible, but revealing their neighbors would x-ray the
+	// walls on the far side, which stay hidden until you step through.
+	// Revealed tiles are remembered as explored, not visible.
 	for dy := -visionRadius; dy <= visionRadius; dy++ {
 		for dx := -visionRadius; dx <= visionRadius; dx++ {
 			tx, ty := px+dx, py+dy
@@ -126,7 +127,7 @@ func (l *Level) UpdateVision(px, py, dir int) {
 				continue
 			}
 			i := l.idx(tx, ty)
-			if !l.visible[i] || l.Tiles[i] == TileWall {
+			if !l.visible[i] || opaqueToVision(l.Tiles[i]) {
 				continue
 			}
 			l.revealWallNeighbors(tx, ty)

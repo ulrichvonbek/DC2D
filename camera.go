@@ -1,9 +1,9 @@
 package main
 
 type Camera struct {
-	width, height  float64
-	worldW, worldH float64
-	x, y           float64
+	width, height  float64 //viewport size
+	worldW, worldH float64 //dungeon size, can vary between levels
+	x, y           float64 //top left corner of the visible area
 }
 
 func NewCamera(width, height int) *Camera {

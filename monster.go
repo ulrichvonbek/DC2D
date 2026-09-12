@@ -16,23 +16,28 @@ const (
 )
 
 // MonsterStats holds the per-type knobs. Pace is the single rhythm that
-// governs the monster: on every beat it attacks if the player is adjacent,
-// otherwise it moves a tile. Spike is the HR bump on a landed hit; HitChance
-// is the chance to land it; OpenDoors says whether the type can pass through
-// door tiles.
+// governs the monster: on every beat it attacks if the player is adjacent or
+// sharing its tile, otherwise it moves a tile. Spike is the HR bump on a
+// landed hit; HitChance is the chance to land it; OpenDoors says whether the
+// type can pass through door tiles; MaxHP is how much player damage it can
+// take before dying. Name is the type's display name.
 type MonsterStats struct {
+	Name      string
 	Pace      time.Duration
 	Spike     float64
 	HitChance float64
 	OpenDoors bool
+	MaxHP     int
 }
 
 func spiderStats() MonsterStats {
 	return MonsterStats{
+		Name:      "Spider",
 		Pace:      1200 * time.Millisecond,
 		Spike:     12,
 		HitChance: 0.5,
 		OpenDoors: false,
+		MaxHP:     5,
 	}
 }
 
@@ -51,6 +56,7 @@ const (
 type Monster struct {
 	TX, TY int
 	stats  MonsterStats
+	HP     int
 	state  monsterState
 
 	lastSeenX, lastSeenY int
@@ -65,6 +71,7 @@ func NewMonster(tx, ty int, stats MonsterStats) *Monster {
 		TX:    tx,
 		TY:    ty,
 		stats: stats,
+		HP:    stats.MaxHP,
 		paceT: rand.Float64() * stats.Pace.Seconds(),
 	}
 }
@@ -90,12 +97,12 @@ func (m *Monster) Update(l *Level, px, py int, dt time.Duration) float64 {
 		m.seekT -= s
 	}
 
-	// One beat: attack when adjacent, otherwise move.
+	// One beat: attack when the player is in reach, otherwise move.
 	spike := 0.0
 	m.paceT -= s
 	if m.paceT <= 0 {
 		m.paceT += m.stats.Pace.Seconds()
-		if m.adjacent(px, py) {
+		if m.nearby(px, py) {
 			if rand.Float64() < m.stats.HitChance {
 				spike = m.stats.Spike
 			}
@@ -170,22 +177,33 @@ func (m *Monster) tryStep(l *Level, dx, dy, px, py int) bool {
 	return true
 }
 
-func (m *Monster) adjacent(px, py int) bool {
+// nearby reports whether the monster and the player are within one tile in
+// both axes: adjacent, or sharing the same tile. Sharing happens when the
+// player walks onto a monster — and that's exactly when it can bite.
+func (m *Monster) nearby(px, py int) bool {
 	dx := absInt(m.TX - px)
 	dy := absInt(m.TY - py)
-	return dx <= 1 && dy <= 1 && dx+dy > 0
+	return dx <= 1 && dy <= 1
 }
 
 func (m *Monster) Draw(screen *ebiten.Image, camera *Camera) {
-	hw := float64(monsterSize) / 2
-	wx := float64(m.TX)*tileSize + float64(tileSize)/2
-	wy := float64(m.TY)*tileSize + float64(tileSize)/2
-	sx, sy := camera.WorldToScreen(wx, wy)
+	sx, sy := monsterSpriteOrigin(m.TX, m.TY, camera)
 
+	hw := float64(monsterSize) / 2
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Translate(-hw, -hw)
 	op.GeoM.Translate(sx+hw, sy+hw)
 	screen.DrawImage(spiderSprite(), op)
+}
+
+// monsterSpriteOrigin is the on-screen position the sprite's drawn box starts
+// at: the tile's top-left corner pushed in by the sprite padding. Combined
+// with the translate(-hw)/translate(+hw) centering idiom the sprite lands
+// squarely in the middle of its tile. The player is immune to this bug
+// because it feeds the same idiom its top-left p.X/p.Y.
+func monsterSpriteOrigin(tx, ty int, camera *Camera) (float64, float64) {
+	pad := (float64(tileSize) - float64(monsterSize)) / 2
+	return camera.WorldToScreen(float64(tx*tileSize)+pad, float64(ty*tileSize)+pad)
 }
 
 var (

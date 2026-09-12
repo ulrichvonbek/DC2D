@@ -51,8 +51,14 @@ const (
 
 var (
 	hrColor     = color.RGBA{200, 40, 40, 255}
-	barBG       = color.RGBA{18, 18, 24, 255}
+	barBG       = color.RGBA{64, 68, 88, 255}    // lighter than the dungeon floor, so the bar reads as a UI chrome rather than a world element
+	barOutline  = color.RGBA{122, 128, 160, 255} // 1px border separating bar from dungeon
 	hrTextColor = color.RGBA{220, 220, 220, 255}
+	handLabel   = color.RGBA{120, 124, 148, 255} // placeholder color for an empty hand
+)
+
+const (
+	barMargin = 12 // px inset for the left/right hand labels
 )
 
 // HRDisplay remembers the last rendered BPM so it can be redrawn in place;
@@ -185,7 +191,12 @@ var (
 func statusImages() (*ebiten.Image, [2]*ebiten.Image) {
 	barImgOnce.Do(func() {
 		barImage = ebiten.NewImage(screenWidth, statusBarHeight)
-		barImage.Fill(barBG)
+		barImage.Fill(barOutline)
+		inner := ebiten.NewImage(screenWidth-2, statusBarHeight-2)
+		inner.Fill(barBG)
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(1, 1)
+		barImage.DrawImage(inner, op)
 		for i := 1; i >= 0; i-- {
 			s := hrSquareSmall + hrSquarePulse*i
 			img := ebiten.NewImage(s, s)
@@ -202,6 +213,47 @@ func blackOverlay() *ebiten.Image {
 		blackImg.Fill(color.RGBA{0, 0, 0, 255})
 	})
 	return blackImg
+}
+
+var (
+	maskCellOnce  sync.Once
+	maskCell      *ebiten.Image // one black dungeon square
+	maskComposite *ebiten.Image // viewport-sized mask, rebuilt as layers grow
+	maskBuiltFor  int
+)
+
+// maskCellImage returns the single-tile black square every covered dungeon
+// square of the blackout mask is made of.
+func maskCellImage() *ebiten.Image {
+	maskCellOnce.Do(func() {
+		maskCell = ebiten.NewImage(tileSize, tileSize)
+		maskCell.Fill(color.RGBA{0, 0, 0, 255})
+	})
+	return maskCell
+}
+
+// maskView builds (or reuses, if the layer count is unchanged) the composite
+// blackout mask: one black tile for every dungeon square whose maskRank is at
+// or below `layer`, so the tiled dither layers darken the dungeon dot by dot.
+// It is rebuilt only when the mask steps, so a fully blocked frame costs a
+// single image draw.
+func maskView(layer int) *ebiten.Image {
+	if maskComposite != nil && maskBuiltFor == layer {
+		return maskComposite
+	}
+	maskComposite = ebiten.NewImage(screenWidth, screenHeight)
+	cell := maskCellImage()
+	for ty := 0; ty < screenHeight/tileSize; ty++ {
+		for tx := 0; tx < screenWidth/tileSize; tx++ {
+			if maskRank(tx, ty) <= layer {
+				op := &ebiten.DrawImageOptions{}
+				op.GeoM.Translate(float64(tx*tileSize), float64(ty*tileSize))
+				maskComposite.DrawImage(cell, op)
+			}
+		}
+	}
+	maskBuiltFor = layer
+	return maskComposite
 }
 
 func DrawStatusBar(screen *ebiten.Image, hr *HeartRate, disp *HRDisplay, now time.Time) {
@@ -227,5 +279,13 @@ func DrawStatusBar(screen *ebiten.Image, hr *HeartRate, disp *HRDisplay, now tim
 	screen.DrawImage(squares[(s-hrSquareSmall)/hrSquarePulse], op)
 
 	baseline := screenHeight + statusBarHeight/2 + ascent/2
+
+	// Left and right hand slots, empty for now: two "EMPTY" placeholders
+	// showing the player holds nothing. These will age into held-item names.
+	empty := "EMPTY"
+	text.Draw(screen, empty, face, barMargin, baseline, handLabel)
+	rightX := screenWidth - barMargin - font.MeasureString(face, empty).Ceil()
+	text.Draw(screen, empty, face, rightX, baseline, handLabel)
+
 	text.Draw(screen, txt, face, x+s+hrTextGap, baseline, hrTextColor)
 }
