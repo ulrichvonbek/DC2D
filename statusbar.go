@@ -27,6 +27,7 @@ const (
 	// passOut (gap shrinks 0.5/level, bottoming out at 10).
 	hrPassOut   = 180
 	hrDeath     = 200
+	hrFlatline  = 220            // above this the heart stops entirely
 	hrAsymptote = hrPassOut + 25 // movement ramp ceiling
 	hrWake      = 150            // vision returns below this
 	hrMaxLevel  = 20
@@ -61,19 +62,28 @@ const (
 	barMargin = 12 // px inset for the left/right hand labels
 )
 
-// HRDisplay remembers the last rendered BPM so it can be redrawn in place;
-// the number itself refreshes at hrTextRefresh.
+// HRDisplay remembers the last rendered BPM (and whether it was fainted) so
+// it can be redrawn in place; the number itself refreshes at hrTextRefresh.
 type HRDisplay struct {
-	text string
-	at   time.Time
+	text    string
+	at      time.Time
+	fainted bool
 }
 
-// Text returns the current BPM rounded to a whole number, recomputed at most
-// once per second.
+// Text returns what the status bar shows next to the square. While the
+// player is passed out (or dead by overload, which is masked to match) the
+// real BPM is shown as ??? — the pulse hammers at the pass-out cadence and
+// the number would give the state away. Coming to forces an immediate
+// refresh back to the true, rounded BPM.
 func (d *HRDisplay) Text(hr *HeartRate, now time.Time) string {
-	if d.text == "" || now.Sub(d.at) >= hrTextRefresh {
+	if hr.fainted || hr.masked {
+		d.text, d.fainted, d.at = "???", true, now
+		return d.text
+	}
+	if d.fainted || d.text == "" || now.Sub(d.at) >= hrTextRefresh {
 		d.text = fmt.Sprintf("%d", int(math.Round(hr.bpm)))
 		d.at = now
+		d.fainted = false
 	}
 	return d.text
 }
@@ -106,11 +116,13 @@ func hrThresholds(level int) HRThresholds {
 
 // HeartRate drives both the pulse animation and the physical state of the
 // player. BPM rises exponentially toward the threshold asymptote while
-// moving and eases back toward baseHR while resting.
+// moving and eases back toward baseHR while resting. `masked` hides the real
+// BPM from the status bar without being part of the faint state machine.
 type HeartRate struct {
 	bpm     float64
 	beats   float64 // fractional beats since the level started
 	fainted bool
+	masked  bool // the bar shows ??? regardless of the true BPM
 	th      HRThresholds
 }
 
@@ -134,10 +146,34 @@ func (h *HeartRate) Bump(n float64) {
 	h.bpm += n
 }
 
+// Die applies the fatal end-state to the bar. flatline=true crashes the rate
+// to a stark 0 (devastation); flatline=false freezes it and masks it as ???
+// so a barely-fatal hit stays indistinguishable from a faint. Either way the
+// faint latch is cleared: a dying heart is no longer in the faint machine.
+func (h *HeartRate) Die(flatline bool) {
+	h.fainted = false
+	if flatline {
+		h.bpm = 0
+		h.masked = false
+	} else {
+		h.masked = true
+	}
+}
+
+// HammerPassOut advances only the pulse clock, at the pass-out cadence, and
+// leaves BPM untouched. An overload death uses it to keep the square beating
+// rapidly exactly like a faint; Update cannot serve here because it would
+// drift the frozen rate.
+func (h *HeartRate) HammerPassOut(dt time.Duration) {
+	h.beats += h.th.passOut * dt.Seconds() / 60
+}
+
 // Update eases the BPM toward its target for this frame. moving=true pushes
 // it toward the threshold asymptote; otherwise it recovers toward baseHR.
 // The beat clock is integrated from dt so each beat advances exactly one
-// flip, regardless of how BPM is ramping.
+// flip, regardless of how BPM is ramping. While unconscious the square
+// hammers at the pass-out cadence (180 BPM at level 0) instead of the
+// real, falling rate, keeping the ambiguity: the number is masked behind ???.
 func (h *HeartRate) Update(dt time.Duration, moving bool) {
 	target, rate := float64(baseHR), restRecoveryRate
 	if moving {
@@ -145,7 +181,11 @@ func (h *HeartRate) Update(dt time.Duration, moving bool) {
 	}
 	s := dt.Seconds()
 	h.bpm += (target - h.bpm) * (1 - math.Exp(-rate*s))
-	h.beats += h.bpm * s / 60
+	beatRate := h.bpm
+	if h.fainted {
+		beatRate = h.th.passOut
+	}
+	h.beats += beatRate * s / 60
 }
 
 // passedOut reports whether the player is unconscious, applying hysteresis:

@@ -145,7 +145,7 @@ func (l *Level) generate() {
 	l.Monsters = l.spawnMonsters(
 		l.firstRoom.x+l.firstRoom.w/2,
 		l.firstRoom.y+l.firstRoom.h/2,
-		spiderSpawnCount)
+		l.Depth)
 }
 
 // placeDoors converts qualifying tiles (one-tile passages through rock)
@@ -395,9 +395,34 @@ func (l *Level) monsterMayOccupy(tx, ty int, m *Monster, px, py int) bool {
 	return true
 }
 
-// spawnMonsters places n monsters on random floor tiles at least 10
-// Manhattan tiles from the player's start, so the first room is calm.
-func (l *Level) spawnMonsters(startX, startY, n int) []*Monster {
+// spawnPool builds the MonsterStats list to place on a depth: every type whose
+// depth window covers it contributes spawn_count entries, in data-file order.
+// Spawning reads this pool so monster rosters are entirely data-driven.
+func spawnPool(depth int) []MonsterStats {
+	ensureMonsters()
+	monsterMu.RLock()
+	reg, order := monsterReg, monsterOrder
+	monsterMu.RUnlock()
+
+	var pool []MonsterStats
+	for _, id := range order {
+		st := reg[id]
+		if depth < st.MinLevel {
+			continue
+		}
+		if st.MaxLevel != 0 && depth > st.MaxLevel {
+			continue
+		}
+		for i := 0; i < st.SpawnCount; i++ {
+			pool = append(pool, st)
+		}
+	}
+	return pool
+}
+
+// spawnMonsters places one monster per spawnPool slot on random floor tiles at
+// least 10 Manhattan tiles from the player's start, so the first room is calm.
+func (l *Level) spawnMonsters(startX, startY, depth int) []*Monster {
 	var tiles [][2]int
 	for ty := 0; ty < l.Height; ty++ {
 		for tx := 0; tx < l.Width; tx++ {
@@ -411,13 +436,15 @@ func (l *Level) spawnMonsters(startX, startY, n int) []*Monster {
 		}
 	}
 
+	pool := spawnPool(depth)
+
 	rand.Shuffle(len(tiles), func(a, b int) {
 		tiles[a], tiles[b] = tiles[b], tiles[a]
 	})
 
-	monsters := make([]*Monster, 0, n)
-	for i := 0; i < n && i < len(tiles); i++ {
-		monsters = append(monsters, NewMonster(tiles[i][0], tiles[i][1], spiderStats()))
+	monsters := make([]*Monster, 0, len(pool))
+	for i := 0; i < len(pool) && i < len(tiles); i++ {
+		monsters = append(monsters, NewMonster(tiles[i][0], tiles[i][1], pool[i]))
 	}
 	return monsters
 }
@@ -425,10 +452,11 @@ func (l *Level) spawnMonsters(startX, startY, n int) []*Monster {
 func (l *Level) Update() {}
 
 // DrawMonsters renders each monster, but only where it is currently lit by
-// the player's vision — never from memory.
+// the player's vision — never from memory, and never if the monster's type is
+// invisible.
 func (l *Level) DrawMonsters(screen *ebiten.Image, camera *Camera) {
 	for _, m := range l.Monsters {
-		if !l.visible[l.idx(m.TX, m.TY)] {
+		if !shown(m.stats, l.visible[l.idx(m.TX, m.TY)]) {
 			continue
 		}
 		m.Draw(screen, camera)

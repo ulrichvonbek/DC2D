@@ -192,6 +192,110 @@ func TestHRDisplayRefreshesOncePerSecond(t *testing.T) {
 	}
 }
 
+// Passing out masks the true BPM behind ??? — the pulse hammers at the
+// pass-out cadence and the number would give the faint away. Waking restores
+// the real figure immediately, with no stale ??? window.
+func TestHRDisplayMasksWhileFaintedAndRestoresOnWake(t *testing.T) {
+	hr := NewHeartRate(baseHR)
+	disp := &HRDisplay{}
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	if got := disp.Text(hr, t0); got != "80" {
+		t.Fatalf("before fainting = %q, want %q", got, "80")
+	}
+
+	hr.bpm = hrPassOut + 2
+	if !hr.passedOut() {
+		t.Fatal("should be passed out")
+	}
+	if got := disp.Text(hr, t0.Add(time.Second)); got != "???" {
+		t.Fatalf("while fainted = %q, want %q", got, "???")
+	}
+	if got := disp.Text(hr, t0.Add(2*time.Second)); got != "???" {
+		t.Fatalf("the mask must hold across refreshes, got %q", got)
+	}
+
+	hr.bpm = hrWake
+	if hr.passedOut() {
+		t.Fatal("should have woken")
+	}
+	if got := disp.Text(hr, t0.Add(3*time.Second)); got != "150" {
+		t.Fatalf("after waking = %q, want %q", got, "150")
+	}
+}
+
+// While passed out the square hammers at the pass-out cadence (180 BPM at
+// level 0) even as the real BPM recovers toward the wake threshold, so the
+// beat clock must advance at that fixed speed, not the falling rate.
+func TestPulseHammersAtPassOutRateWhileFainted(t *testing.T) {
+	hr := NewHeartRate(baseHR)
+	hr.bpm = hrPassOut
+	if !hr.passedOut() {
+		t.Fatal("should have passed out")
+	}
+
+	// Let BPM start recovering below the pass-out threshold while out.
+	for i := 0; i < 5; i++ {
+		prev := hr.bpm
+		hr.Update(100*time.Millisecond, false)
+		if hr.bpm >= prev {
+			t.Fatalf("bpm must recover while out (now %.1f)", hr.bpm)
+		}
+	}
+
+	// Three full beats at the pass-out cadence: three flips, exactly.
+	before := hr.beats
+	flips := 0
+	last := hr.size()
+	for i := 0; i < 3; i++ {
+		hr.Update(time.Minute/time.Duration(hr.th.passOut), false)
+		if hr.size() != last {
+			flips++
+			last = hr.size()
+		}
+	}
+	if got := hr.beats - before; got < 2.9 || got > 3.05 {
+		t.Fatalf("beats advanced %.2f over 3 pass-out periods, want ~3", got)
+	}
+	if flips != 3 {
+		t.Fatalf("square flipped %d times, want 3 at the pass-out cadence", flips)
+	}
+}
+
+// An overload death freezes BPM but must keep the square hammering at the
+// pass-out cadence, so the masked bar is indistinguishable from a faint.
+// HammerPassOut advances only the pulse clock, never the rate.
+func TestHammerPassOutAdvancesBeatsOnly(t *testing.T) {
+	hr := NewHeartRate(baseHR)
+	hr.bpm = hrPassOut + 5 // 185: a rate that must NOT drive the hammer
+	if !hr.passedOut() {
+		t.Fatal("should have passed out")
+	}
+	hr.Die(false) // overload death: frozen and masked
+	bpm, beats := hr.bpm, hr.beats
+
+	const step = 10 * time.Millisecond
+	flips := 0
+	last := hr.size()
+	for i := 0; i < 6000; i++ { // one simulated minute
+		hr.HammerPassOut(step)
+		if hr.size() != last {
+			flips++
+			last = hr.size()
+		}
+	}
+	// One beat per pass-out period: 180 in a minute, not 185 (the real BPM).
+	if got := hr.beats - beats; got < 179.5 || got > 180.5 {
+		t.Fatalf("beats advanced %.2f over a minute, want 180", got)
+	}
+	if flips < 179 || flips > 181 {
+		t.Fatalf("square flipped %d times, want 180 at the pass-out cadence", flips)
+	}
+	if hr.bpm != bpm {
+		t.Fatalf("HammerPassOut moved BPM: %.1f -> %.1f, want frozen", bpm, hr.bpm)
+	}
+}
+
 func TestHeartRateBumpSpikes(t *testing.T) {
 	hr := NewHeartRate(120)
 	hr.Bump(hrBumpSpike)

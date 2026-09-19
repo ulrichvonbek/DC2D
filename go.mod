@@ -4,6 +4,7 @@ go 1.26.7
 
 require (
 	github.com/hajimehoshi/ebiten/v2 v2.9.11
+	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/image v0.43.0
 	pgregory.net/rapid v1.3.0
 )

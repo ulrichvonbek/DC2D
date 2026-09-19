@@ -1,0 +1,45 @@
+# DC2D monster definitions.
+#
+# Each entry is one monster type. `id` is the stable key used by spawning and
+# tests; `name` is the display name shown in combat log lines.
+#
+# pace        : time between monster beats (attack or move), e.g. 1200ms
+# spike       : HR bump the player takes when the monster lands a hit
+# hit_chance  : chance in [0,1] that a beat attack lands
+# open_doors  : whether the type can pass through door tiles
+# max_hp      : player damage the monster can absorb before dying
+# shape       : sprite silhouette. Empty defaults to spider; must be a known
+#               shape defined in code (monster.go).
+# color       : body tint, RGB 0-255.
+# invisible   : true monsters are only drawn when a light source reveals them;
+#               no light sources exist yet, so all types are false for now.
+# min_level   : earliest dungeon depth the type spawns on.
+# max_level   : deepest depth the type spawns on; 0 means no upper bound.
+# spawn_count : how many of this type place on each eligible level.
+monsters:
+  - id: spider
+    name: Spider
+    pace: 1200ms
+    spike: 12
+    hit_chance: 0.5
+    open_doors: false
+    max_hp: 5
+    shape: spider
+    color: [235, 120, 110]
+    invisible: false
+    min_level: 1
+    max_level: 0
+    spawn_count: 5
+  - id: snake
+    name: Snake
+    pace: 1000ms
+    spike: 24
+    hit_chance: 0.6
+    open_doors: false
+    max_hp: 15
+    shape: snake
+    color: [120, 180, 90]
+    invisible: false
+    min_level: 1
+    max_level: 0
+    spawn_count: 2

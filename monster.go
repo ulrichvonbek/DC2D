@@ -10,35 +10,49 @@ import (
 )
 
 const (
-	spiderSpawnCount = 5   // spiders placed per level for now
-	seekDuration     = 4.0 // s, how long a monster pursues a lost scent
-	monsterSize      = 12  // px sprite size
+	seekDuration = 4.0 // s, how long a monster pursues a lost scent
+	monsterSize  = 12  // px sprite size
+
+	// Sprite silhouettes the monsters.yaml `shape` field can select; each has
+	// its own builder feeding buildShapeSprite.
+	shapeSpider = "spider"
+	shapeSnake  = "snake"
 )
 
-// MonsterStats holds the per-type knobs. Pace is the single rhythm that
-// governs the monster: on every beat it attacks if the player is adjacent or
-// sharing its tile, otherwise it moves a tile. Spike is the HR bump on a
-// landed hit; HitChance is the chance to land it; OpenDoors says whether the
-// type can pass through door tiles; MaxHP is how much player damage it can
-// take before dying. Name is the type's display name.
+// MonsterStats holds the per-type knobs, loaded from monsters.yaml. Pace is
+// the single rhythm that governs the monster: on every beat it attacks if the
+// player is adjacent or sharing its tile, otherwise it moves a tile. Spike is
+// the HR bump on a landed hit; HitChance is the chance to land it; OpenDoors
+// says whether the type can pass through door tiles; MaxHP is how much player
+// damage it can take before dying; Name is the type's display name. Shape
+// selects the sprite silhouette, Color tints it, and Invisible hides the
+// monster from unaided sight (light sources will reveal it later). MinLevel,
+// MaxLevel, and SpawnCount drive spawning: the type appears only on depths in
+// [MinLevel, MaxLevel] (0 = no upper bound) and contributes SpawnCount
+// placements per eligible level.
 type MonsterStats struct {
-	Name      string
-	Pace      time.Duration
-	Spike     float64
-	HitChance float64
-	OpenDoors bool
-	MaxHP     int
+	Name       string
+	Pace       time.Duration
+	Spike      float64
+	HitChance  float64
+	OpenDoors  bool
+	MaxHP      int
+	Shape      string
+	Color      [3]uint8
+	Invisible  bool
+	MinLevel   int
+	MaxLevel   int
+	SpawnCount int
 }
 
+// spiderStats returns the data-file definition for the spider, the default
+// monster. A missing spider is a startup bug, so it panics.
 func spiderStats() MonsterStats {
-	return MonsterStats{
-		Name:      "Spider",
-		Pace:      1200 * time.Millisecond,
-		Spike:     12,
-		HitChance: 0.5,
-		OpenDoors: false,
-		MaxHP:     5,
+	st, ok := monsterByID(monsterIDSpider)
+	if !ok {
+		panic("dungeon data is missing the spider monster")
 	}
+	return st
 }
 
 type monsterState int
@@ -186,14 +200,22 @@ func (m *Monster) nearby(px, py int) bool {
 	return dx <= 1 && dy <= 1
 }
 
+// Draw renders the monster's silhouette tinted by its type color, centered
+// dead-middle in its tile.
 func (m *Monster) Draw(screen *ebiten.Image, camera *Camera) {
 	sx, sy := monsterSpriteOrigin(m.TX, m.TY, camera)
 
 	hw := float64(monsterSize) / 2
 	op := &ebiten.DrawImageOptions{}
+	op.ColorScale.Scale(
+		float32(m.stats.Color[0])/255,
+		float32(m.stats.Color[1])/255,
+		float32(m.stats.Color[2])/255,
+		1,
+	)
 	op.GeoM.Translate(-hw, -hw)
 	op.GeoM.Translate(sx+hw, sy+hw)
-	screen.DrawImage(spiderSprite(), op)
+	screen.DrawImage(spriteFor(m.stats.Shape), op)
 }
 
 // monsterSpriteOrigin is the on-screen position the sprite's drawn box starts
@@ -207,35 +229,104 @@ func monsterSpriteOrigin(tx, ty int, camera *Camera) (float64, float64) {
 }
 
 var (
-	spiderSpriteImg *ebiten.Image
-	spiderSpriteOne sync.Once
+	shapeSprites sync.Map // shape key -> white base silhouette *ebiten.Image
 )
 
-func spiderSprite() *ebiten.Image {
-	spiderSpriteOne.Do(func() {
-		img := ebiten.NewImage(monsterSize, monsterSize)
-		c := color.RGBA{235, 120, 110, 255}
+// spriteFor returns the white base silhouette for a sprite shape, built on
+// first use. The base is white so Monster.Draw can tint it exactly with
+// ColorScale per type.
+func spriteFor(shape string) *ebiten.Image {
+	if v, ok := shapeSprites.Load(shape); ok {
+		return v.(*ebiten.Image)
+	}
+	img := buildShapeSprite(shape)
+	shapeSprites.Store(shape, img)
+	return img
+}
 
-		fill := func(x, y, w, h int) {
-			part := ebiten.NewImage(w, h)
-			part.Fill(c)
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(float64(x), float64(y))
-			img.DrawImage(part, op)
-		}
+// buildShapeSprite draws a shape's block silhouette in solid white. Which
+// shapes exist is validated at load time; the fallback keeps a bad runtime
+// shape from crashing the renderer.
+func buildShapeSprite(shape string) *ebiten.Image {
+	switch shape {
+	case shapeSpider:
+		return spiderShapeSprite()
+	case shapeSnake:
+		return snakeShapeSprite()
+	default:
+		return spiderShapeSprite()
+	}
+}
 
-		fill(4, 4, 4, 4) // body
-		// eight short legs at the corners
-		fill(0, 0, 2, 3)
-		fill(10, 0, 2, 3)
-		fill(0, 9, 2, 3)
-		fill(10, 9, 2, 3)
-		fill(2, 0, 2, 4)
-		fill(8, 0, 2, 4)
-		fill(2, 8, 2, 4)
-		fill(8, 8, 2, 4)
+// spiderShapeSprite is the eight-legged silhouette every spider — and for now
+// every recolored type — shares.
+func spiderShapeSprite() *ebiten.Image {
+	img := ebiten.NewImage(monsterSize, monsterSize)
+	white := color.RGBA{255, 255, 255, 255}
 
-		spiderSpriteImg = img
-	})
-	return spiderSpriteImg
+	fill := func(x, y, w, h int) {
+		part := ebiten.NewImage(w, h)
+		part.Fill(white)
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(float64(x), float64(y))
+		img.DrawImage(part, op)
+	}
+
+	fill(4, 4, 4, 4) // body
+	// eight short legs at the corners
+	fill(0, 0, 2, 3)
+	fill(10, 0, 2, 3)
+	fill(0, 9, 2, 3)
+	fill(10, 9, 2, 3)
+	fill(2, 0, 2, 4)
+	fill(8, 0, 2, 4)
+	fill(2, 8, 2, 4)
+	fill(8, 8, 2, 4)
+
+	return img
+}
+
+// snakeShapeSprite is a slithering S: a three-block body running from a thick
+// head at the top right down to a tapering tail at the bottom left, built
+// from the same white block primitives as every silhouette.
+func snakeShapeSprite() *ebiten.Image {
+	img := ebiten.NewImage(monsterSize, monsterSize)
+	white := color.RGBA{255, 255, 255, 255}
+
+	fill := func(x, y, w, h int) {
+		part := ebiten.NewImage(w, h)
+		part.Fill(white)
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(float64(x), float64(y))
+		img.DrawImage(part, op)
+	}
+
+	fill(1, 7, 3, 3) // tail
+	fill(3, 5, 3, 3)
+	fill(5, 3, 3, 3)
+	fill(7, 1, 4, 3) // head, wider than the body
+	fill(11, 2, 1, 1)
+
+	return img
+}
+
+// knownShape reports whether a silhouette key is defined in code.
+func knownShape(shape string) bool {
+	switch shape {
+	case shapeSpider, shapeSnake:
+		return true
+	}
+	return false
+}
+
+// knownShapes lists the valid silhouette keys for error messages.
+func knownShapes() string {
+	return shapeSpider + ", " + shapeSnake
+}
+
+// shown reports whether a monster is drawn given whether its tile is in
+// sight. Invisible monsters stay hidden until a light source can reveal them;
+// that revelation will enter here once light items exist.
+func shown(stats MonsterStats, inSight bool) bool {
+	return inSight && !stats.Invisible
 }

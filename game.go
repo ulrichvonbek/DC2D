@@ -18,6 +18,8 @@ type Game struct {
 	lastUpdate    time.Time
 	blackoutAlpha float64
 	dead          bool
+	diedAt        time.Time // when the death threshold was crossed
+	flatlined     bool      // HR blew past hrFlatline: the heart stopped
 	playerLevel   int
 
 	cmdVerb      verb
@@ -33,22 +35,47 @@ type Game struct {
 }
 
 func NewGame() *Game {
+	g := &Game{}
+	g.reset()
+	return g
+}
+
+// reset returns the game to a fresh run: new depth-1 dungeon, player, heart
+// rate, camera, log, and window title. It clears any previous death so a
+// restart genuinely starts over rather than un-fading the old world.
+func (g *Game) reset() {
 	level := NewLevel(screenWorldW, screenWorldH)
 	startX, startY := level.StartPosition()
-	player := NewPlayer(startX, startY)
 
-	camera := NewCamera(screenWidth, screenHeight)
-	camera.SetWorld(level.Width*tileSize, level.Height*tileSize)
+	g.player = NewPlayer(startX, startY)
+	g.level = level
+	g.camera = NewCamera(screenWidth, screenHeight)
+	g.camera.SetWorld(level.Width*tileSize, level.Height*tileSize)
+	g.heartRate = NewHeartRate(baseHR)
+	g.hrDisplay = HRDisplay{}
+	g.lastUpdate = time.Now()
+	g.playerLevel = 0 // XP will raise this and scale the HR thresholds
+
+	g.blackoutAlpha = 0
+	g.dead = false
+	g.diedAt = time.Time{}
+	g.flatlined = false
+	g.helpOpen = false
+	g.fainted = false
+	g.maskProgress = 0
+	g.maskNext = time.Time{}
+	g.cmdVerb = verbNone
+	g.cmdPending = false
+	g.inputLog = nil
+	g.floorItems = nil
+	g.backpackItems = nil
+
 	ebiten.SetWindowTitle(fmt.Sprintf("Dungeon Crawl — Depth %d", level.Depth))
+}
 
-	return &Game{
-		player:      player,
-		level:       level,
-		camera:      camera,
-		heartRate:   NewHeartRate(baseHR),
-		lastUpdate:  time.Now(),
-		playerLevel: 0, // XP will raise this and scale the HR thresholds
-	}
+// restart is what the R key on the death screen invokes: a brand-new game.
+func (g *Game) restart() {
+	g.reset()
 }
 
 // Cached just-pressed keys freed by inpututil — only the command keys are
@@ -65,6 +92,21 @@ func (g *Game) Update() error {
 
 	if g.dead {
 		g.blackoutAlpha = fadeToward(g.blackoutAlpha, 1, dt)
+		// An overload death keeps the square hammering at the pass-out
+		// cadence, exactly like a faint; only a flatline stops the pulse.
+		if !g.flatlined {
+			g.heartRate.HammerPassOut(dt)
+		}
+		// Once the fade has landed and the fateful beat has passed, the end
+		// screen's two keys go live: R starts a new run, ESC quits cleanly.
+		if deathReady(g.blackoutAlpha, now.Sub(g.diedAt)) {
+			switch {
+			case inpututil.IsKeyJustPressed(ebiten.KeyR):
+				g.restart()
+			case inpututil.IsKeyJustPressed(ebiten.KeyEscape):
+				return errQuit
+			}
+		}
 		return nil
 	}
 
@@ -170,6 +212,14 @@ func (g *Game) Update() error {
 
 	if g.heartRate.BPM() >= g.heartRate.Death() {
 		g.dead = true
+		g.diedAt = now
+		// Two deaths: an overload freeze in place, or a flatline where the
+		// heart stops outright. Either way HR stops updating from this frame
+		// on, since the dead branch below never reaches its Update. The
+		// overload band (death..hrFlatline) keeps the bar masked as ??? like
+		// a faint: only a devastating hit past the cap reveals the 0.
+		g.flatlined = g.heartRate.BPM() > hrFlatline
+		g.heartRate.Die(g.flatlined)
 	}
 
 	target := 0.0
@@ -311,6 +361,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			op := &ebiten.DrawImageOptions{}
 			op.ColorScale.ScaleAlpha(float32(g.blackoutAlpha))
 			screen.DrawImage(blackOverlay(), op)
+		}
+		if deathReady(g.blackoutAlpha, time.Now().Sub(g.diedAt)) {
+			DrawDeath(screen, g.flatlined)
 		}
 	} else if g.maskProgress > 0 {
 		// A passing-out spell erodes the dungeon chunk by chunk; the info
